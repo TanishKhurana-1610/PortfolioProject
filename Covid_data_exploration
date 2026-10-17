@@ -1,0 +1,125 @@
+-- Looking at the Data
+Select Location, date, total_cases, new_cases, total_deaths, population
+From dbo.CovidDeaths
+Order By 1, 2
+-- Total deaths vs Total Cases
+Select Location, date, total_cases, total_deaths, (total_deaths / total_cases) * 100 AS DeathPercentage
+FROM dbo.CovidDeaths
+Order BY 1, 2
+
+-- Total cases vs Population
+
+Select Location, date, total_cases, Population, (total_cases / population) * 100 AS DeathPercentage
+FROM dbo.CovidDeaths
+Where location = 'Australia'
+Order BY 1, 2
+
+-- Looking at countries wth Highest Infection Rate compared to Population
+
+Select Location, Population, MAX(total_cases) AS HighestInfectionCount, MAX((total_cases / population) * 100) AS DeathPercentage
+FROM dbo.CovidDeaths
+Group by Location, Population
+Order BY DeathPercentage Desc;
+
+-- Showing the countries with Highest death count Per Population
+-- Breaking it down b Continent
+
+Select Location, MAX(total_deaths) AS HighestDeathCount
+FROM dbo.CovidDeaths
+Where Continent IS NULL
+Group by Location
+Order BY HighestDeathCount Desc;
+
+-- Showing the Continents with the highest death counts
+Select Location, MAX(total_deaths) AS HighestDeathCount
+FROM dbo.CovidDeaths
+Where Continent IS NULL
+Group by Location
+Order BY HighestDeathCount Desc;
+
+-- Breaking into Gloabal Numbers
+
+Select date, SUM(new_cases) AS Total_cases, SUM(cast(new_deaths as int)) as Total_Deaths, SUM(cast(new_deaths as int))/SUM(new_cases)*100 AS DeathPercentage
+FROM dbo.CovidDeaths
+Where Continent IS not NULL
+Group by date
+Order BY 1,2;
+
+-- Joining the two tables for Analysis
+
+SELECT *
+FROM dbo.CovidDeaths as cod
+JOIN dbo.CovidVaccinations as cov
+    ON cod.location = cov.location
+    AND cod.date = cov.date
+
+-- Looking at Total Population vs Vaccincation
+
+SELECT cod.continent, cod.location, cod.date, cod.Population, cov.new_vaccinations, 
+SUM(cast(cov.new_vaccinations as int)) OVER(Partition by cod.location order by cod.date) AS RollingPeopleVaccinated
+FROM dbo.CovidDeaths as cod
+JOIN dbo.CovidVaccinations as cov
+    ON cod.location = cov.location
+    AND cod.date = cov.date
+where cod.continent is not NULL
+order by 2, 3
+
+-- Using CTE
+
+WITH Popsvac(Continent, Loction, Date, Population, New_Vaccination, RollingPeopleVaccinated)
+as(
+SELECT cod.continent, cod.location, cod.date, cod.Population, cov.new_vaccinations, 
+SUM(cast(cov.new_vaccinations as int)) OVER(Partition by cod.location order by cod.date) AS RollingPeopleVaccinated
+FROM dbo.CovidDeaths as cod
+JOIN dbo.CovidVaccinations as cov
+    ON cod.location = cov.location
+    AND cod.date = cov.date
+where cod.continent is not NULL
+)
+Select *, (RollingPeopleVaccinated/Population)*100 as VaccinationPercentage
+From Popsvac;
+
+-- TEMP TABLE
+DROP TABLE IF EXISTS #PercentPoplationVaccinated
+Create Table #PercentPoplationVaccinated
+(
+    Continent nvarchar(255),
+    Location nvarchar(255),
+    Date datetime,
+    Population numeric,
+    New_Vaccnations Numeric,
+    RollingPeopleVaccinated numeric,
+) 
+INSERT INTO #PercentPoplationVaccinated
+SELECT cod.continent, cod.location, cod.date, cod.Population, cov.new_vaccinations, 
+SUM(cast(cov.new_vaccinations as int)) OVER(Partition by cod.location order by cod.date) 
+AS RollingPeopleVaccinated
+FROM dbo.CovidDeaths as cod
+JOIN dbo.CovidVaccinations as cov
+    ON cod.location = cov.location
+    AND cod.date = cov.date
+WHERE cod.continent is not NULL;
+
+Select *, (RollingPeopleVaccinated/Population)*100 as VaccinationPercentage
+From #PercentPoplationVaccinated;
+
+-- Creating View to store data for future visualiations
+
+CREATE VIEW dbo.PopulationPercentageVaccinated AS
+SELECT
+    cod.continent,
+    cod.location,
+    cod.date,
+    cod.population,
+    cov.new_vaccinations,
+    SUM(TRY_CAST(cov.new_vaccinations AS BIGINT))
+        OVER (
+            PARTITION BY cod.location
+            ORDER BY TRY_CONVERT(DATE, cod.date)
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS RollingPeopleVaccinated
+FROM dbo.CovidDeaths AS cod
+JOIN dbo.CovidVaccinations AS cov
+    ON cod.location = cov.location
+    AND cod.date = cov.date
+WHERE cod.continent IS NOT NULL;
